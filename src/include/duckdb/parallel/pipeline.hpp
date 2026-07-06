@@ -79,10 +79,6 @@ class Pipeline : public enable_shared_from_this<Pipeline> {
 
 public:
 	explicit Pipeline(Executor &execution_context);
-	~Pipeline();
-
-	unique_ptr<PipelineExecutor> GetExecutor();
-	void ReturnExecutor(unique_ptr<PipelineExecutor> executor);
 
 	Executor &executor;
 
@@ -164,11 +160,6 @@ private:
 	//! The reason is that when we start a new pipeline we insert the current minimum batch index as a placeholder
 	//! Which leads to duplicate entries in the set of active batch indexes
 	multiset<idx_t> batch_indexes;
-
-	//! Lock for the executor pool
-	mutex executor_lock;
-	//! Cached executors for this pipeline
-	vector<unique_ptr<PipelineExecutor>> configured_executors;
 
 private:
 	void ScheduleSequentialTask(shared_ptr<Event> &event);

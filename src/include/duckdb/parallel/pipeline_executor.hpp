@@ -58,7 +58,6 @@ private:
 class PipelineExecutor {
 public:
 	PipelineExecutor(ClientContext &context, Pipeline &pipeline);
-	~PipelineExecutor();
 
 	//! Fully execute a pipeline with a source and a sink until the source is completely exhausted
 	PipelineExecuteResult Execute();
