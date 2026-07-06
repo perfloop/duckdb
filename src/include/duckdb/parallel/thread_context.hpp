@@ -20,14 +20,9 @@ public:
 	explicit ThreadContext(ClientContext &context);
 	~ThreadContext();
 
-	Logger &GetLogger() const;
-
 	//! The operator profiler for the individual thread context
 	OperatorProfiler profiler;
-
-private:
-	ClientContext &context;
-	mutable unique_ptr<Logger> logger;
+	unique_ptr<Logger> logger;
 };
 
 } // namespace duckdb

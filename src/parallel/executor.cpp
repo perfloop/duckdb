@@ -748,6 +748,7 @@ unique_ptr<DataChunk> Executor::FetchChunk(Allocator &allocator, const vector<Lo
 	if (it != chunk_pool.end() && !it->second.empty()) {
 		auto chunk = std::move(it->second.back());
 		it->second.pop_back();
+		D_ASSERT(chunk->GetTypes() == types);
 		chunk->Reset();
 		return chunk;
 	}
@@ -760,12 +761,11 @@ void Executor::ReturnChunk(const vector<LogicalType> &types, unique_ptr<DataChun
 	if (!chunk) {
 		return;
 	}
+	D_ASSERT(chunk->GetTypes() == types);
 	chunk->Reset();
 	lock_guard<mutex> guard(chunk_pool_lock);
 	auto &vec = chunk_pool[types];
-	if (vec.size() < 128) {
-		vec.push_back(std::move(chunk));
-	}
+	vec.push_back(std::move(chunk));
 }
 
 } // namespace duckdb
