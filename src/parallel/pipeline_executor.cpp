@@ -11,6 +11,8 @@
 #include <thread>
 #endif
 
+#include <unordered_map>
+
 namespace duckdb {
 
 PipelineExecutor::PipelineExecutor(ClientContext &context_p, Pipeline &pipeline_p)
@@ -36,8 +38,7 @@ PipelineExecutor::PipelineExecutor(ClientContext &context_p, Pipeline &pipeline_
 		auto &prev_operator = i == 0 ? *pipeline.source : pipeline.operators[i - 1].get();
 		auto &current_operator = pipeline.operators[i].get();
 
-		auto chunk = make_uniq<DataChunk>();
-		chunk->Initialize(BufferAllocator::Get(context.client), prev_operator.GetTypes());
+		auto chunk = pipeline.executor.FetchChunk(BufferAllocator::Get(context.client), prev_operator.GetTypes());
 		intermediate_chunks.push_back(std::move(chunk));
 
 		auto op_state = current_operator.GetOperatorState(context);
@@ -49,7 +50,23 @@ PipelineExecutor::PipelineExecutor(ClientContext &context_p, Pipeline &pipeline_
 			FinishProcessing();
 		}
 	}
-	InitializeChunk(final_chunk);
+	auto &last_op = pipeline.operators.empty() ? *pipeline.source : pipeline.operators.back().get();
+	final_chunk = pipeline.executor.FetchChunk(BufferAllocator::Get(context.client), last_op.GetTypes());
+}
+
+PipelineExecutor::~PipelineExecutor() {
+	// Return intermediate chunks to the pool
+	for (idx_t i = 0; i < intermediate_chunks.size(); i++) {
+		if (intermediate_chunks[i]) {
+			auto &prev_operator = i == 0 ? *pipeline.source : pipeline.operators[i - 1].get();
+			pipeline.executor.ReturnChunk(prev_operator.GetTypes(), std::move(intermediate_chunks[i]));
+		}
+	}
+	// Return final chunk to the pool
+	if (final_chunk) {
+		auto &last_op = pipeline.operators.empty() ? *pipeline.source : pipeline.operators.back().get();
+		pipeline.executor.ReturnChunk(last_op.GetTypes(), std::move(final_chunk));
+	}
 }
 
 void PipelineExecutor::Reset() {
@@ -110,7 +127,7 @@ void PipelineExecutor::Reset() {
 	}
 
 	// Reset the final chunk data (keep allocation)
-	final_chunk.Reset();
+	final_chunk->Reset();
 }
 
 void PipelineExecutor::PrepareForExecution() {
@@ -147,7 +164,7 @@ bool PipelineExecutor::TryFlushCachingOperators(ExecutionBudget &chunk_budget) {
 		}
 
 		auto &curr_chunk =
-		    flushing_idx + 1 >= intermediate_chunks.size() ? final_chunk : *intermediate_chunks[flushing_idx + 1];
+		    flushing_idx + 1 >= intermediate_chunks.size() ? *final_chunk : *intermediate_chunks[flushing_idx + 1];
 		auto &current_operator = pipeline.operators[flushing_idx].get();
 
 		OperatorFinalizeResultType finalize_result;
@@ -259,7 +276,7 @@ SinkNextBatchType PipelineExecutor::NextBatch(DataChunk &source_chunk, const boo
 
 PipelineExecuteResult PipelineExecutor::Execute(idx_t max_chunks) {
 	D_ASSERT(pipeline.sink);
-	auto &source_chunk = pipeline.operators.empty() ? final_chunk : *intermediate_chunks[0];
+	auto &source_chunk = pipeline.operators.empty() ? *final_chunk : *intermediate_chunks[0];
 	ExecutionBudget chunk_budget(max_chunks);
 
 	do {
@@ -271,7 +288,7 @@ PipelineExecuteResult PipelineExecutor::Execute(idx_t max_chunks) {
 			break;
 		} else if (remaining_sink_chunk) {
 			// The pipeline was interrupted by the Sink. We should retry sinking the final chunk.
-			result = ExecutePushInternal(final_chunk, chunk_budget);
+			result = ExecutePushInternal(*final_chunk, chunk_budget);
 			D_ASSERT(result != OperatorResultType::HAVE_MORE_OUTPUT);
 			remaining_sink_chunk = false;
 		} else if (!in_process_operators.empty() && !started_flushing) {
@@ -386,17 +403,17 @@ OperatorResultType PipelineExecutor::ExecutePushInternal(DataChunk &input, Execu
 	OperatorResultType result = OperatorResultType::HAVE_MORE_OUTPUT;
 	do {
 		// Note: if input is the final_chunk, we don't do any executing, the chunk just needs to be sinked
-		if (&input != &final_chunk) {
-			final_chunk.Reset();
+		if (&input != final_chunk.get()) {
+			final_chunk->Reset();
 			// Execute and put the result into 'final_chunk'
-			result = Execute(input, final_chunk, initial_idx);
+			result = Execute(input, *final_chunk, initial_idx);
 			if (result == OperatorResultType::FINISHED) {
 				return OperatorResultType::FINISHED;
 			}
 		} else {
 			result = OperatorResultType::NEED_MORE_INPUT;
 		}
-		auto &sink_chunk = final_chunk;
+		auto &sink_chunk = *final_chunk;
 		if (sink_chunk.size() > 0) {
 			StartOperator(*pipeline.sink);
 			D_ASSERT(pipeline.sink);

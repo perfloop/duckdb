@@ -742,4 +742,30 @@ unique_ptr<QueryResult> Executor::GetResult() {
 	return result_collector.GetResult(*result_collector.sink_state);
 }
 
+unique_ptr<DataChunk> Executor::FetchChunk(Allocator &allocator, const vector<LogicalType> &types) {
+	lock_guard<mutex> guard(chunk_pool_lock);
+	auto it = chunk_pool.find(types);
+	if (it != chunk_pool.end() && !it->second.empty()) {
+		auto chunk = std::move(it->second.back());
+		it->second.pop_back();
+		chunk->Reset();
+		return chunk;
+	}
+	auto chunk = make_uniq<DataChunk>();
+	chunk->Initialize(allocator, types);
+	return chunk;
+}
+
+void Executor::ReturnChunk(const vector<LogicalType> &types, unique_ptr<DataChunk> chunk) {
+	if (!chunk) {
+		return;
+	}
+	chunk->Reset();
+	lock_guard<mutex> guard(chunk_pool_lock);
+	auto &vec = chunk_pool[types];
+	if (vec.size() < 128) {
+		vec.push_back(std::move(chunk));
+	}
+}
+
 } // namespace duckdb

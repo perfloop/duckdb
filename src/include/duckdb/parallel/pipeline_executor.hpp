@@ -58,6 +58,7 @@ private:
 class PipelineExecutor {
 public:
 	PipelineExecutor(ClientContext &context, Pipeline &pipeline);
+	~PipelineExecutor();
 
 	//! Fully execute a pipeline with a source and a sink until the source is completely exhausted
 	PipelineExecuteResult Execute();
@@ -109,7 +110,7 @@ private:
 	InterruptState interrupt_state;
 
 	//! The final chunk used for moving data into the sink
-	DataChunk final_chunk;
+	unique_ptr<DataChunk> final_chunk;
 
 	//! The operators that are not yet finished executing and have data remaining
 	//! If the stack of in_process_operators is empty, we fetch from the source instead

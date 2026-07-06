@@ -117,6 +117,37 @@ public:
 		executor_tasks--;
 	}
 
+public:
+	struct LogicalTypeVectorHash {
+		std::size_t operator()(const vector<LogicalType> &k) const {
+			size_t hash = k.size();
+			for (auto &type : k) {
+				hash ^= type.Hash() + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			}
+			return hash;
+		}
+	};
+
+	struct LogicalTypeVectorEquality {
+		bool operator()(const vector<LogicalType> &a, const vector<LogicalType> &b) const {
+			if (a.size() != b.size()) {
+				return false;
+			}
+			for (idx_t i = 0; i < a.size(); i++) {
+				if (a[i] != b[i]) {
+					return false;
+				}
+			}
+			return true;
+		}
+	};
+
+	using ChunkPoolMap = unordered_map<vector<LogicalType>, vector<unique_ptr<DataChunk>>, LogicalTypeVectorHash,
+	                                   LogicalTypeVectorEquality>;
+
+	unique_ptr<DataChunk> FetchChunk(Allocator &allocator, const vector<LogicalType> &types);
+	void ReturnChunk(const vector<LogicalType> &types, unique_ptr<DataChunk> chunk);
+
 	idx_t GetTotalPipelines() const {
 		return total_pipelines;
 	}
@@ -192,5 +223,9 @@ private:
 
 	//! Total time blocked while waiting on tasks. In ticks. One tick corresponds to WAIT_TIME.
 	atomic<idx_t> blocked_thread_time;
+
+private:
+	mutex chunk_pool_lock;
+	ChunkPoolMap chunk_pool;
 };
 } // namespace duckdb
