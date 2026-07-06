@@ -59,13 +59,14 @@ PipelineExecutor::~PipelineExecutor() {
 	for (idx_t i = 0; i < intermediate_chunks.size(); i++) {
 		if (intermediate_chunks[i]) {
 			auto &prev_operator = i == 0 ? *pipeline.source : pipeline.operators[i - 1].get();
-			pipeline.executor.ReturnChunk(prev_operator.GetTypes(), std::move(intermediate_chunks[i]));
+			pipeline.executor.ReturnChunk(BufferAllocator::Get(context.client), prev_operator.GetTypes(),
+			                              std::move(intermediate_chunks[i]));
 		}
 	}
 	// Return final chunk to the pool
 	if (final_chunk) {
 		auto &last_op = pipeline.operators.empty() ? *pipeline.source : pipeline.operators.back().get();
-		pipeline.executor.ReturnChunk(last_op.GetTypes(), std::move(final_chunk));
+		pipeline.executor.ReturnChunk(BufferAllocator::Get(context.client), last_op.GetTypes(), std::move(final_chunk));
 	}
 }
 

@@ -118,23 +118,29 @@ public:
 	}
 
 public:
-	struct LogicalTypeVectorHash {
-		std::size_t operator()(const vector<LogicalType> &k) const {
-			size_t hash = k.size();
-			for (auto &type : k) {
+	struct ChunkPoolKeyHash {
+		std::size_t operator()(const pair<Allocator*, vector<LogicalType>> &k) const {
+			size_t hash = std::hash<Allocator*>()(k.first);
+			hash ^= k.second.size() + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			for (auto &type : k.second) {
 				hash ^= type.Hash() + 0x9e3779b9 + (hash << 6) + (hash >> 2);
 			}
 			return hash;
 		}
 	};
 
-	struct LogicalTypeVectorEquality {
-		bool operator()(const vector<LogicalType> &a, const vector<LogicalType> &b) const {
-			if (a.size() != b.size()) {
+	struct ChunkPoolKeyEquality {
+		bool operator()(const pair<Allocator*, vector<LogicalType>> &a, const pair<Allocator*, vector<LogicalType>> &b) const {
+			if (a.first != b.first) {
 				return false;
 			}
-			for (idx_t i = 0; i < a.size(); i++) {
-				if (a[i] != b[i]) {
+			auto &vec_a = a.second;
+			auto &vec_b = b.second;
+			if (vec_a.size() != vec_b.size()) {
+				return false;
+			}
+			for (idx_t i = 0; i < vec_a.size(); i++) {
+				if (vec_a[i] != vec_b[i]) {
 					return false;
 				}
 			}
@@ -142,11 +148,10 @@ public:
 		}
 	};
 
-	using ChunkPoolMap = unordered_map<vector<LogicalType>, vector<unique_ptr<DataChunk>>, LogicalTypeVectorHash,
-	                                   LogicalTypeVectorEquality>;
+	using ChunkPoolMap = unordered_map<pair<Allocator*, vector<LogicalType>>, vector<unique_ptr<DataChunk>>, ChunkPoolKeyHash, ChunkPoolKeyEquality>;
 
 	unique_ptr<DataChunk> FetchChunk(Allocator &allocator, const vector<LogicalType> &types);
-	void ReturnChunk(const vector<LogicalType> &types, unique_ptr<DataChunk> chunk);
+	void ReturnChunk(Allocator &allocator, const vector<LogicalType> &types, unique_ptr<DataChunk> chunk);
 
 	idx_t GetTotalPipelines() const {
 		return total_pipelines;
@@ -155,6 +160,10 @@ public:
 	idx_t GetCompletedPipelines() const {
 		return completed_pipelines.load();
 	}
+
+private:
+	mutex chunk_pool_lock;
+	ChunkPoolMap chunk_pool;
 
 private:
 	//! Check if the streaming query result is waiting to be fetched from, must hold the 'executor_lock'
@@ -223,9 +232,5 @@ private:
 
 	//! Total time blocked while waiting on tasks. In ticks. One tick corresponds to WAIT_TIME.
 	atomic<idx_t> blocked_thread_time;
-
-private:
-	mutex chunk_pool_lock;
-	ChunkPoolMap chunk_pool;
 };
 } // namespace duckdb
