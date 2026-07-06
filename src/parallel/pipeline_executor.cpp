@@ -52,6 +52,9 @@ PipelineExecutor::PipelineExecutor(ClientContext &context_p, Pipeline &pipeline_
 	InitializeChunk(final_chunk);
 }
 
+PipelineExecutor::~PipelineExecutor() {
+}
+
 void PipelineExecutor::Reset() {
 	D_ASSERT(pipeline.source_state);
 	auto allow_reuse = Settings::Get<EnableCachingOperatorsSetting>(context.client);

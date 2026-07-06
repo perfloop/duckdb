@@ -27,11 +27,11 @@ Logger &Logger::Get(const DatabaseInstance &db) {
 }
 
 Logger &Logger::Get(const ThreadContext &thread_context) {
-	return *thread_context.logger;
+	return thread_context.GetLogger();
 }
 
 Logger &Logger::Get(const ExecutionContext &execution_context) {
-	return *execution_context.thread.logger;
+	return execution_context.thread.GetLogger();
 }
 
 Logger &Logger::Get(const ClientContext &client_context) {

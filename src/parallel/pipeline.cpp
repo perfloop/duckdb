@@ -23,6 +23,9 @@ PipelineTask::PipelineTask(Pipeline &pipeline_p, shared_ptr<Event> event_p)
 bool PipelineTask::TaskBlockedOnResult() const {
 	// If this returns true, it means the pipeline this task belongs to has a cached chunk
 	// that was the result of the Sink method returning BLOCKED
+	if (!pipeline_executor) {
+		return false;
+	}
 	return pipeline_executor->RemainingSinkChunk();
 }
 
@@ -32,7 +35,7 @@ const PipelineExecutor &PipelineTask::GetPipelineExecutor() const {
 
 TaskExecutionResult PipelineTask::ExecuteTask(TaskExecutionMode mode) {
 	if (!pipeline_executor) {
-		pipeline_executor = make_uniq<PipelineExecutor>(pipeline.GetClientContext(), pipeline);
+		pipeline_executor = pipeline.GetExecutor();
 	}
 
 	pipeline_executor->SetTaskForInterrupts(shared_from_this());
@@ -61,12 +64,33 @@ TaskExecutionResult PipelineTask::ExecuteTask(TaskExecutionMode mode) {
 	}
 
 	event->FinishTask();
-	pipeline_executor.reset();
+	pipeline.ReturnExecutor(std::move(pipeline_executor));
 	return TaskExecutionResult::TASK_FINISHED;
 }
 
 Pipeline::Pipeline(Executor &executor_p)
     : executor(executor_p), ready(false), initialized(false), source(nullptr), sink(nullptr) {
+}
+
+Pipeline::~Pipeline() {
+}
+
+unique_ptr<PipelineExecutor> Pipeline::GetExecutor() {
+	lock_guard<mutex> guard(executor_lock);
+	if (configured_executors.empty()) {
+		auto executor = make_uniq<PipelineExecutor>(GetClientContext(), *this);
+		executor->PrepareForExecution();
+		return executor;
+	}
+	auto executor = std::move(configured_executors.back());
+	configured_executors.pop_back();
+	executor->PrepareForExecution();
+	return executor;
+}
+
+void Pipeline::ReturnExecutor(unique_ptr<PipelineExecutor> executor) {
+	lock_guard<mutex> guard(executor_lock);
+	configured_executors.push_back(std::move(executor));
 }
 
 ClientContext &Pipeline::GetClientContext() {
