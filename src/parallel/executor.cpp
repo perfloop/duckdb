@@ -744,7 +744,9 @@ unique_ptr<QueryResult> Executor::GetResult() {
 
 unique_ptr<DataChunk> Executor::FetchChunk(Allocator &allocator, const vector<LogicalType> &types) {
 	if (&allocator == &BufferAllocator::Get(context)) {
-		lock_guard<mutex> guard(chunk_pool_lock);
+		auto pool_idx = TaskScheduler::GetEstimatedCPUId() % CHUNK_POOL_COUNT;
+		lock_guard<mutex> guard(chunk_pool_locks[pool_idx]);
+		auto &chunk_pool = chunk_pools[pool_idx];
 		auto it = chunk_pool.find(ChunkPoolLookupKey {types});
 		if (it != chunk_pool.end() && !it->second.empty()) {
 			auto chunk = std::move(it->second.back());
@@ -771,7 +773,9 @@ void Executor::ReturnChunk(Allocator &allocator, const vector<LogicalType> &type
 	}
 	if (&allocator == &BufferAllocator::Get(context)) {
 		chunk->Reset();
-		lock_guard<mutex> guard(chunk_pool_lock);
+		auto pool_idx = TaskScheduler::GetEstimatedCPUId() % CHUNK_POOL_COUNT;
+		lock_guard<mutex> guard(chunk_pool_locks[pool_idx]);
+		auto &chunk_pool = chunk_pools[pool_idx];
 		auto it = chunk_pool.find(ChunkPoolLookupKey {types});
 		if (it != chunk_pool.end()) {
 			it->second.push_back(std::move(chunk));
