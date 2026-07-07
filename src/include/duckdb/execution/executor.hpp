@@ -120,12 +120,10 @@ public:
 
 public:
 	struct ChunkPoolKey {
-		Allocator *allocator;
 		vector<LogicalType> types;
 	};
 
 	struct ChunkPoolLookupKey {
-		Allocator *allocator;
 		const vector<LogicalType> &types;
 	};
 
@@ -142,36 +140,24 @@ public:
 				if (ta.id() != tb.id()) {
 					return ta.id() < tb.id();
 				}
-				auto ha = ta.Hash();
-				auto hb = tb.Hash();
-				if (ha != hb) {
-					return ha < hb;
-				}
-				if (ta != tb) {
-					return ta.ToString() < tb.ToString();
+				auto ptr_a = (uintptr_t)ta.AuxInfo().get();
+				auto ptr_b = (uintptr_t)tb.AuxInfo().get();
+				if (ptr_a != ptr_b) {
+					return ptr_a < ptr_b;
 				}
 			}
 			return false;
 		}
 
 		bool operator()(const ChunkPoolKey &a, const ChunkPoolKey &b) const {
-			if (a.allocator != b.allocator) {
-				return a.allocator < b.allocator;
-			}
 			return CompareLogicalTypes(a.types, b.types);
 		}
 
 		bool operator()(const ChunkPoolKey &a, const ChunkPoolLookupKey &b) const {
-			if (a.allocator != b.allocator) {
-				return a.allocator < b.allocator;
-			}
 			return CompareLogicalTypes(a.types, b.types);
 		}
 
 		bool operator()(const ChunkPoolLookupKey &a, const ChunkPoolKey &b) const {
-			if (a.allocator != b.allocator) {
-				return a.allocator < b.allocator;
-			}
 			return CompareLogicalTypes(a.types, b.types);
 		}
 	};

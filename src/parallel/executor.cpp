@@ -743,16 +743,18 @@ unique_ptr<QueryResult> Executor::GetResult() {
 }
 
 unique_ptr<DataChunk> Executor::FetchChunk(Allocator &allocator, const vector<LogicalType> &types) {
-	lock_guard<mutex> guard(chunk_pool_lock);
-	auto it = chunk_pool.find(ChunkPoolLookupKey {&allocator, types});
-	if (it != chunk_pool.end() && !it->second.empty()) {
-		auto chunk = std::move(it->second.back());
-		it->second.pop_back();
-		if (chunk->GetTypes() != types) {
-			chunk.reset();
-		} else {
-			chunk->Reset();
-			return chunk;
+	if (&allocator == &BufferAllocator::Get(context)) {
+		lock_guard<mutex> guard(chunk_pool_lock);
+		auto it = chunk_pool.find(ChunkPoolLookupKey {types});
+		if (it != chunk_pool.end() && !it->second.empty()) {
+			auto chunk = std::move(it->second.back());
+			it->second.pop_back();
+			if (chunk->GetTypes() != types) {
+				chunk.reset();
+			} else {
+				chunk->Reset();
+				return chunk;
+			}
 		}
 	}
 	auto chunk = make_uniq<DataChunk>();
@@ -767,15 +769,17 @@ void Executor::ReturnChunk(Allocator &allocator, const vector<LogicalType> &type
 	if (chunk->GetTypes() != types) {
 		return; // discard if types are modified during execution
 	}
-	chunk->Reset();
-	lock_guard<mutex> guard(chunk_pool_lock);
-	auto it = chunk_pool.find(ChunkPoolLookupKey {&allocator, types});
-	if (it != chunk_pool.end()) {
-		it->second.push_back(std::move(chunk));
-	} else {
-		vector<unique_ptr<DataChunk>> vec;
-		vec.push_back(std::move(chunk));
-		chunk_pool.emplace(ChunkPoolKey {&allocator, types}, std::move(vec));
+	if (&allocator == &BufferAllocator::Get(context)) {
+		chunk->Reset();
+		lock_guard<mutex> guard(chunk_pool_lock);
+		auto it = chunk_pool.find(ChunkPoolLookupKey {types});
+		if (it != chunk_pool.end()) {
+			it->second.push_back(std::move(chunk));
+		} else {
+			vector<unique_ptr<DataChunk>> vec;
+			vec.push_back(std::move(chunk));
+			chunk_pool.emplace(ChunkPoolKey {types}, std::move(vec));
+		}
 	}
 }
 
