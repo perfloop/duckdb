@@ -176,9 +176,8 @@ public:
 	}
 
 private:
-	static constexpr idx_t CHUNK_POOL_COUNT = 32;
-	mutex chunk_pool_locks[CHUNK_POOL_COUNT];
-	ChunkPoolMap chunk_pools[CHUNK_POOL_COUNT];
+	mutex chunk_pool_lock;
+	ChunkPoolMap chunk_pool;
 
 private:
 	//! Check if the streaming query result is waiting to be fetched from, must hold the 'executor_lock'
