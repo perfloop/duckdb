@@ -19,6 +19,7 @@
 #include "duckdb/parallel/pipeline.hpp"
 
 #include <condition_variable>
+#include <map>
 
 namespace duckdb {
 class ClientContext;
@@ -118,37 +119,64 @@ public:
 	}
 
 public:
-	struct ChunkPoolKeyHash {
-		std::size_t operator()(const pair<Allocator*, vector<LogicalType>> &k) const {
-			size_t hash = std::hash<Allocator*>()(k.first);
-			hash ^= k.second.size() + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-			for (auto &type : k.second) {
-				hash ^= type.Hash() + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-			}
-			return hash;
-		}
+	struct ChunkPoolKey {
+		Allocator *allocator;
+		vector<LogicalType> types;
 	};
 
-	struct ChunkPoolKeyEquality {
-		bool operator()(const pair<Allocator*, vector<LogicalType>> &a, const pair<Allocator*, vector<LogicalType>> &b) const {
-			if (a.first != b.first) {
-				return false;
+	struct ChunkPoolLookupKey {
+		Allocator *allocator;
+		const vector<LogicalType> &types;
+	};
+
+	struct ChunkPoolCompare {
+		using is_transparent = void;
+
+		static bool CompareLogicalTypes(const vector<LogicalType> &a, const vector<LogicalType> &b) {
+			if (a.size() != b.size()) {
+				return a.size() < b.size();
 			}
-			auto &vec_a = a.second;
-			auto &vec_b = b.second;
-			if (vec_a.size() != vec_b.size()) {
-				return false;
-			}
-			for (idx_t i = 0; i < vec_a.size(); i++) {
-				if (vec_a[i] != vec_b[i]) {
-					return false;
+			for (size_t i = 0; i < a.size(); ++i) {
+				auto &ta = a[i];
+				auto &tb = b[i];
+				if (ta.id() != tb.id()) {
+					return ta.id() < tb.id();
+				}
+				auto ha = ta.Hash();
+				auto hb = tb.Hash();
+				if (ha != hb) {
+					return ha < hb;
+				}
+				if (ta != tb) {
+					return ta.ToString() < tb.ToString();
 				}
 			}
-			return true;
+			return false;
+		}
+
+		bool operator()(const ChunkPoolKey &a, const ChunkPoolKey &b) const {
+			if (a.allocator != b.allocator) {
+				return a.allocator < b.allocator;
+			}
+			return CompareLogicalTypes(a.types, b.types);
+		}
+
+		bool operator()(const ChunkPoolKey &a, const ChunkPoolLookupKey &b) const {
+			if (a.allocator != b.allocator) {
+				return a.allocator < b.allocator;
+			}
+			return CompareLogicalTypes(a.types, b.types);
+		}
+
+		bool operator()(const ChunkPoolLookupKey &a, const ChunkPoolKey &b) const {
+			if (a.allocator != b.allocator) {
+				return a.allocator < b.allocator;
+			}
+			return CompareLogicalTypes(a.types, b.types);
 		}
 	};
 
-	using ChunkPoolMap = unordered_map<pair<Allocator*, vector<LogicalType>>, vector<unique_ptr<DataChunk>>, ChunkPoolKeyHash, ChunkPoolKeyEquality>;
+	using ChunkPoolMap = std::map<ChunkPoolKey, vector<unique_ptr<DataChunk>>, ChunkPoolCompare>;
 
 	unique_ptr<DataChunk> FetchChunk(Allocator &allocator, const vector<LogicalType> &types);
 	void ReturnChunk(Allocator &allocator, const vector<LogicalType> &types, unique_ptr<DataChunk> chunk);

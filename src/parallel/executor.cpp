@@ -744,7 +744,7 @@ unique_ptr<QueryResult> Executor::GetResult() {
 
 unique_ptr<DataChunk> Executor::FetchChunk(Allocator &allocator, const vector<LogicalType> &types) {
 	lock_guard<mutex> guard(chunk_pool_lock);
-	auto it = chunk_pool.find(make_pair(&allocator, types));
+	auto it = chunk_pool.find(ChunkPoolLookupKey {&allocator, types});
 	if (it != chunk_pool.end() && !it->second.empty()) {
 		auto chunk = std::move(it->second.back());
 		it->second.pop_back();
@@ -769,8 +769,14 @@ void Executor::ReturnChunk(Allocator &allocator, const vector<LogicalType> &type
 	}
 	chunk->Reset();
 	lock_guard<mutex> guard(chunk_pool_lock);
-	auto &vec = chunk_pool[make_pair(&allocator, types)];
-	vec.push_back(std::move(chunk));
+	auto it = chunk_pool.find(ChunkPoolLookupKey {&allocator, types});
+	if (it != chunk_pool.end()) {
+		it->second.push_back(std::move(chunk));
+	} else {
+		vector<unique_ptr<DataChunk>> vec;
+		vec.push_back(std::move(chunk));
+		chunk_pool.emplace(ChunkPoolKey {&allocator, types}, std::move(vec));
+	}
 }
 
 } // namespace duckdb
